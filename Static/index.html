@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CoverFlat</title>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+:root{--bg:#f3f5f6;--surface:#fff;--ink:#14232b;--muted:#5b6b73;--line:#cfd8dc;--accent:#0b5c7a;--accent-ink:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1a20;--surface:#17262e;--ink:#e6eef1;--muted:#93a5ad;--line:#2b414b;--accent:#4db3d6;--accent-ink:#06222c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Segoe UI",system-ui,sans-serif}
+header{padding:20px 28px;border-bottom:1px solid var(--line);background:var(--surface)}
+h1{margin:0;font:600 22px/1.2 Georgia,serif;letter-spacing:.01em}
+header p{margin:4px 0 0;color:var(--muted);font-size:14px}
+main{display:grid;grid-template-columns:300px 1fr;gap:20px;padding:20px 28px}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+aside,.stage{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:18px}
+label{display:block;font-size:14px;margin:14px 0 4px}
+input[type=number],input[type=file],input[type=text]{width:100%;padding:8px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink)}
+button,a.btn{display:inline-block;margin-top:18px;padding:10px 16px;border:0;border-radius:4px;background:var(--accent);color:var(--accent-ink);font:600 15px inherit;cursor:pointer;text-decoration:none}
+button:disabled{opacity:.5;cursor:wait}
+button:focus-visible,a.btn:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+small{color:var(--muted)}
+#msg{margin-top:14px;font-size:14px}
+#msg.err{color:#c0392b}
+.stage{overflow:auto;min-height:420px}
+svg{width:100%;height:auto;max-height:70vh;background:var(--bg);border-radius:4px}
+.legend{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--muted)}
+.bar{flex:0 0 200px;height:10px;border-radius:5px;background:linear-gradient(90deg,#2c7bb6,#ffffbf,#d7191c)}
+table{border-collapse:collapse;width:100%;margin-top:14px;font-size:14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+svg{touch-action:none}
+#v3{height:460px;background:var(--bg);border-radius:4px;position:relative}#v3 canvas{display:block;width:100%;height:100%}
+#bl{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin-top:10px;font-size:14px}
+#bl label{margin:0;padding:4px 6px;border-radius:4px}#bl input{vertical-align:middle;margin-left:4px}
+.tabs button,#arr button{margin:0 6px 8px 0;padding:6px 12px}
+</style>
+</head>
+<body>
+<header><h1>CoverFlat</h1><p>Flatten STEP surfaces into cutting patterns, with seam allowance and DXF export.</p></header>
+<main>
+<aside>
+  <label for="f">STEP file (.stp, .step)</label>
+  <input id="f" type="file" accept=".stp,.step">
+  <label for="mode">Flatten each</label>
+  <select id="mode" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink)">
+    <option value="body">Body (all its surfaces together)</option>
+    <option value="face">Single surface</option>
+  </select>
+  <label for="tol">Mesh tolerance (mm)</label>
+  <input id="tol" type="number" value="2" min="0.1" step="0.1">
+  <label for="sa">Seam allowance (mm)</label>
+  <input id="sa" type="number" value="15" min="0" step="1">
+  <label for="ms">Split panels above this stretch (%)</label>
+  <input id="ms" type="number" value="8" min="0" step="1">
+  <small>0 turns automatic seam splitting off.</small>
+  <label for="ns">Notch spacing on seams (mm)</label>
+  <input id="ns" type="number" value="200" min="0" step="10">
+  <label for="md">Match edges of neighbouring bodies within (mm)</label>
+  <input id="md" type="number" value="10" min="0" step="1">
+  <small>Edges closer than this are treated as sewn together and get matching notches. 0 turns it off.</small>
+  <label for="fa">Mark folds sharper than (degrees)</label>
+  <input id="fa" type="number" value="30" min="0" step="5">
+  <small>Where a body bends sharply, a dashed fold line is drawn. 0 turns it off.</small>
+  <label for="ga">Grain line angle (degrees)</label>
+  <input id="ga" type="number" value="0" step="5">
+  <label for="jn">Job name (for instructions)</label>
+  <input id="jn" type="text" placeholder="e.g. Foredeck cover">
+  <label for="fb">Fabric</label>
+  <input id="fb" type="text">
+  <label for="th">Thread</label>
+  <input id="th" type="text">
+  <label for="stc">Stitch</label>
+  <input id="stc" type="text" placeholder="e.g. Lockstitch, 3.5 mm">
+  <button id="go">Flatten</button>
+  <div id="msg" role="status"></div>
+  <a id="dl" class="btn" hidden>Download DXF</a> <a id="wi" class="btn" target="_blank" hidden>Sewing instructions</a>
+  <p><small>Each body in the STEP file becomes a panel. Panels that stretch more than the limit are split automatically into smaller panels joined by a seam, with matching notches on both sides.</small></p>
+</aside>
+<section class="stage">
+  <div class="tabs"><button id="t3">3D model</button><button id="tf">Flat patterns</button></div>
+  <div id="v3box" hidden><div id="v3"></div><div id="bl"></div><small>Drag to rotate, scroll to zoom. Pick a colour for each body, then click Flatten. Colours you pick are used in the preview and the work instruction.</small></div>
+  <div id="flat">
+  <div id="arr" style="margin-bottom:6px;font-size:14px">Selected: <b id="selp">none</b>
+    <button data-r="-5">&#8634; 5&deg;</button><button data-r="-1">&#8634; 1&deg;</button><button data-r="1">&#8635; 1&deg;</button><button data-r="5">&#8635; 5&deg;</button><button data-f="1">Flip</button><button id="rst">Reset layout</button><br>
+    <small>Drag a panel to move it. Moves, rotations and flips carry into the DXF and the work instruction. A panel can come out mirrored, so use Flip if edges will not match.</small></div>
+  <svg id="svg" viewBox="0 0 100 60" aria-label="Flattened panels"></svg>
+  <label style="display:block;margin:10px 0 0"><input type="checkbox" id="fl" checked onchange="if(last)draw(last)"> Show fold lines (dashed)</label>
+  <label style="display:block;margin:4px 0 0"><input type="checkbox" id="bc" checked onchange="if(last)draw(last)"> Show body colours from STEP</label>
+  <label style="display:block;margin:4px 0 0"><input type="checkbox" id="sw" onchange="if(last){draw(last);setLinks()}"> Use the other side's colour</label>
+  <label style="display:block;margin:4px 0 0"><input type="checkbox" id="lb" onchange="if(last){draw(last);setLinks()}"> Show seam end labels (3a, 3b)</label>
+  <label style="display:block;margin:4px 0 0"><input type="checkbox" id="hm" onchange="if(last)draw(last)"> Show stretch colours</label>
+  <div class="legend"><span>Compressed</span><span class="bar"></span><span>Stretched</span><span>(yellow = no distortion)</span></div>
+  <table id="tbl" hidden><thead><tr><th>Panel</th><th>Body colour</th><th>Surface area (mm²)</th><th>Worst stretch</th><th>Notches</th><th>Folds</th></tr></thead><tbody></tbody></table>
+</div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+function color(s){ // s = flat/3D area ratio; map 0.7..1.3 to blue..yellow..red
+  const t=Math.max(0,Math.min(1,(s-0.7)/0.6));
+  const a=[44,123,182],m=[255,255,191],b=[215,25,28];
+  const [p,q,u]=t<.5?[a,m,t*2]:[m,b,(t-.5)*2];
+  return `rgb(${p.map((v,i)=>Math.round(v+(q[i]-v)*u)).join(",")})`;
+}
+$("go").onclick=async()=>{
+  const file=$("f").files[0], msg=$("msg");
+  msg.className="";
+  if(!file){msg.className="err";msg.textContent="Choose a STEP file first.";return;}
+  const fd=new FormData();
+  if(UP)fd.append("upload",UP);else fd.append("file",file);fd.append("colors",JSON.stringify(OV));fd.append("mode",$("mode").value);fd.append("fold_angle",$("fa").value);fd.append("match_dist",$("md").value);fd.append("tolerance",$("tol").value);fd.append("seam_allowance",$("sa").value);fd.append("max_stretch",$("ms").value);fd.append("notch_spacing",$("ns").value);fd.append("grain_angle",$("ga").value);
+  $("go").disabled=true;msg.textContent="Flattening. Large models can take a minute.";
+  try{
+    const r=await fetch("/api/flatten",{method:"POST",body:fd});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||"Flattening failed.");
+    last=d;ST={};SEL=null;PM=Object.fromEntries(d.panels.map(p=>[p.id,p]));draw(d);show("flat");const nn=d.panels.reduce((s,p)=>s+p.notches.length,0);msg.textContent=`Flattened ${d.panels.length} panel(s) from ${d.bodies} body(ies), ${d.seams} seam(s), ${nn} notch(es), ${d.folds} fold line(s).${d.coloured?(d.panels.some(p=>p.color2)?'':' No second colour was found on any body.'):' No body colours were found in the file.'}`+(nn?'':' No touching edges were found. If you expected some, check that the panels are separate bodies in the STEP file, and try a larger match distance.');
+    setLinks();$("dl").hidden=false;$("wi").hidden=false;
+  }catch(e){msg.className="err";msg.textContent=e.message;}
+  $("go").disabled=false;
+};
+let last=null;
+function setLinks(){
+  if(!last)return;
+  const l=$("lb").checked?1:0;
+  $("dl").href="/api/dxf/"+last.job+"?labels="+l;
+  $("wi").href="/api/instructions/"+last.job+"?"+new URLSearchParams({job_name:$("jn").value,fabric:$("fb").value,thread:$("th").value,stitch:$("stc").value,labels:l,swap:$("sw").checked?1:0});
+}
+["jn","fb","th","stc"].forEach(i=>$(i).addEventListener("input",setLinks));
+function bcol(p){return $("sw").checked&&p.color2?p.color2:p.color;}
+function fc(p,i){if($("hm").checked)return color(p.stretch[i]);if($("bc").checked&&bcol(p))return bcol(p);return "#e4eaed";}
+let ST={},SEL=null,PM={},drag=null,UP="",OV={},COL={},R3=null;
+const st=id=>ST[id]||(ST[id]={f:0,a:0,x:0,y:0});
+function tf(p){const s=st(p.id);return `translate(${s.x} ${s.y}) translate(${p.cx} ${p.cy}) rotate(${s.a}) scale(${s.f?-1:1} 1) translate(${-p.cx} ${-p.cy})`;}
+function commit(id){fetch("/api/arrange/"+last.job,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({label:id,...st(id)})});}
+function show(w){$("v3box").hidden=w!=="3d";$("flat").hidden=w==="3d";}
+$("t3").onclick=()=>show("3d");$("tf").onclick=()=>show("flat");
+function panelSVG(p,fs){
+  let h="";
+  p.tris.forEach((t,i)=>{const c=fc(p,i);h+=`<polygon points="${t.map(k=>p.verts[k].join(",")).join(" ")}" fill="${c}" stroke="${c}" stroke-width=".3"/>`;});
+  const op=p.outline.map(q=>q.join(",")).join(" ");
+  h+=`<polygon points="${op}" fill="none" stroke="#14232b" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+  if(p.id===SEL)h+=`<polygon points="${op}" fill="none" stroke="#0a84ff" stroke-width="5" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>`;
+  if($("fl").checked)for(const pts of p.folds)h+=`<polyline points="${pts.map(q=>q.join(",")).join(" ")}" fill="none" stroke="#111" stroke-width="3" stroke-dasharray="10 6" vector-effect="non-scaling-stroke"/>`;
+  for(const [n,pts,c] of p.edges)h+=`<polyline points="${pts.map(q=>q.join(",")).join(" ")}" fill="none" stroke="${c}" stroke-width="4" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+  for(const [a,b] of p.notches)h+=`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#e67e22" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`;
+  if($("lb").checked)for(const [x,y,t,c] of p.tags)h+=`<text x="${x}" y="${y}" font-size="${fs}" font-weight="600" fill="${c}" text-anchor="middle" dominant-baseline="middle" stroke="#fff" stroke-width="${fs/6}" paint-order="stroke">${t}</text>`;
+  return h+`<text x="${p.cx}" y="${p.cy}" font-size="${fs*1.3}" font-weight="600" fill="#14232b" stroke="#fff" stroke-width="${fs/5}" paint-order="stroke" text-anchor="middle" dominant-baseline="middle">P${p.id}</text>`;
+}
+function draw(d){
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for(const p of d.panels)for(const [x,y] of p.outline){x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}
+  const w=x1-x0,ht=y1-y0,pad=Math.max(w,ht)*.5,fs=w/60;
+  $("svg").setAttribute("viewBox",`${x0-pad} ${y0-pad} ${w+2*pad} ${ht+2*pad}`);
+  $("svg").innerHTML=d.panels.map(p=>`<g class="pg" data-id="${p.id}" transform="${tf(p)}" style="cursor:grab">${panelSVG(p,fs)}</g>`).join("");
+  $("selp").textContent=SEL?"P"+SEL:"none";
+  $("tbl").hidden=false;
+  $("tbl").tBodies[0].innerHTML=d.panels.map(p=>`<tr><td>P${p.id}</td><td>${bcol(p)?`<span style="display:inline-block;width:14px;height:14px;background:${bcol(p)};border:1px solid #888;vertical-align:middle"></span> ${bcol(p)}`:'-'}${p.color2?` <small>(other: ${bcol(p)==p.color?p.color2:p.color})</small>`:''}</td><td>${p.area_mm2.toLocaleString()}</td><td>${p.max_stretch_pct}%</td><td>${p.notches.length}</td><td>${p.folds.length?p.folds.length+' ('+p.fold_max+'°)':'-'}</td></tr>`).join("");
+}
+
+const svg=$("svg");
+const spt=e=>{const q=new DOMPoint(e.clientX,e.clientY).matrixTransform(svg.getScreenCTM().inverse());return [q.x,q.y];};
+svg.addEventListener("pointerdown",e=>{const g=e.target.closest(".pg");if(!g||!last)return;const id=g.dataset.id,s=st(id),first=SEL!==id;SEL=id;drag={id,p0:spt(e),x:s.x,y:s.y};svg.setPointerCapture(e.pointerId);if(first)draw(last);});
+svg.addEventListener("pointermove",e=>{if(!drag)return;const q=spt(e),s=st(drag.id);s.x=drag.x+q[0]-drag.p0[0];s.y=drag.y+q[1]-drag.p0[1];const g=svg.querySelector(`.pg[data-id="${drag.id}"]`);if(g)g.setAttribute("transform",tf(PM[drag.id]));});
+svg.addEventListener("pointerup",()=>{if(drag){const id=drag.id;drag=null;commit(id);}});
+$("arr").addEventListener("click",e=>{const b=e.target.closest("button");if(!b||!last)return;
+  if(b.id==="rst"){ST={};Object.keys(PM).forEach(commit);draw(last);return;}
+  if(!SEL)return;const s=st(SEL);if(b.dataset.f)s.f=1-s.f;else s.a+=+b.dataset.r;draw(last);commit(SEL);});
+
+function show3d(bodies){
+  if(typeof THREE==="undefined")throw new Error("The 3D viewer could not load (it needs an internet connection). You can still click Flatten.");
+  const el=$("v3");
+  if(!R3){
+    const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(45,1,1,1e7),rd=new THREE.WebGLRenderer({antialias:true,alpha:true});
+    cam.up.set(0,0,1);rd.setPixelRatio(window.devicePixelRatio);el.appendChild(rd.domElement);
+    const oc=new THREE.OrbitControls(cam,rd.domElement);
+    sc.add(new THREE.HemisphereLight(0xffffff,0x666677,1));const dl=new THREE.DirectionalLight(0xffffff,.5);dl.position.set(1,-1,2);sc.add(dl);
+    R3={sc,cam,rd,oc,w:0,h:0,meshes:[],group:null};
+    rd.domElement.addEventListener("click",e=>{const r=rd.domElement.getBoundingClientRect(),rc=new THREE.Raycaster();
+      rc.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1),cam);
+      const hit=rc.intersectObjects(R3.meshes)[0];if(!hit)return;
+      document.querySelectorAll("#bl label").forEach(l=>l.style.outline=l.dataset.i==hit.object.userData.idx?"2px solid var(--accent)":"");});
+    (function loop(){requestAnimationFrame(loop);const w=el.clientWidth,h=el.clientHeight;
+      if(w&&(w!==R3.w||h!==R3.h)){R3.w=w;R3.h=h;rd.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();}
+      oc.update();rd.render(sc,cam);})();
+  }
+  if(R3.group)R3.sc.remove(R3.group);
+  const g=new THREE.Group();R3.meshes=[];
+  for(const b of bodies){
+    COL[b.idx]=b.colors[0]||"#9aa5aa";
+    const geo=new THREE.BufferGeometry();geo.setAttribute("position",new THREE.Float32BufferAttribute(b.pos,3));geo.setIndex(b.tris);geo.computeVertexNormals();
+    const m=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({color:COL[b.idx],side:THREE.DoubleSide}));m.userData.idx=b.idx;g.add(m);R3.meshes.push(m);
+    g.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo,30),new THREE.LineBasicMaterial({color:0x111111})));
+  }
+  R3.sc.add(g);R3.group=g;
+  const box=new THREE.Box3().setFromObject(g),c=box.getCenter(new THREE.Vector3()),sz=box.getSize(new THREE.Vector3()).length()||1;
+  R3.cam.position.set(c.x+sz*.8,c.y-sz*.8,c.z+sz*.6);R3.cam.near=sz/1000;R3.cam.far=sz*20;R3.cam.updateProjectionMatrix();R3.oc.target.copy(c);R3.oc.update();
+  $("bl").innerHTML=bodies.map(b=>`<label data-i="${b.idx}">Body ${b.idx} <input type="color" data-i="${b.idx}" value="${COL[b.idx]}"> <small>${b.colors.length?"from file":"no colour in file"}</small></label>`).join("");
+}
+$("bl").addEventListener("input",e=>{const i=e.target.dataset.i;if(i===undefined)return;OV[i]=COL[i]=e.target.value;
+  const m=R3.meshes.find(m=>m.userData.idx==i);if(m)m.material.color.set(e.target.value);});
+async function inspect3d(){
+  const file=$("f").files[0];if(!file)return;
+  UP="";OV={};COL={};$("msg").className="";$("msg").textContent="Reading the model...";
+  const fd=new FormData();fd.append("file",file);fd.append("mode",$("mode").value);fd.append("tolerance",$("tol").value);
+  try{
+    const r=await fetch("/api/inspect",{method:"POST",body:fd}),d=await r.json();
+    if(!r.ok)throw new Error(d.detail||"Could not read the file.");
+    UP=d.upload;$("msg").textContent=`${d.bodies.length} bodies found. Pick colours if you like, then click Flatten.`;
+    show3d(d.bodies);show("3d");
+  }catch(e){$("msg").className="err";$("msg").textContent=e.message;}
+}
+$("f").addEventListener("change",inspect3d);
+$("mode").addEventListener("change",()=>{if($("f").files[0])inspect3d();});
+</script>
+</body>
+</html>
